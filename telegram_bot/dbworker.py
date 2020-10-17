@@ -20,3 +20,18 @@ def save_users_city(user_id, city):
     except:
         # тут желательно как-то обработать ситуацию
         return False
+
+def save_set_of_restaurants(user_id, rest_id):
+    # сохраняем id ресторанов в базу Редис
+    db.sadd(f'{user_id} category', str(rest_id))
+
+    return True
+
+def get_set_of_restaurants(user_id):
+    # Получаем множество с id ресторанов
+    return db.smembers(f'{user_id} category')
+
+def clear_set_of_restaurants(user_id):
+    while (db.scard(f'{user_id} category') > 0):
+        print("Removing {}...".format(db.spop(f'{user_id} category')))
+    return True
