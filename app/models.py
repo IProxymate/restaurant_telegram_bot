@@ -49,6 +49,8 @@ class Restaurant(models.Model):
     categories = models.ManyToManyField(Category)
     google_map_link = models.CharField(max_length=250)
     options = models.ManyToManyField(Options, blank=True)
+    coordinates = models.CharField(max_length=150, blank=True, null=True)
+    
 
     class Meta:
         verbose_name = 'Ресторан'

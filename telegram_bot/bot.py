@@ -3,10 +3,11 @@ from django.core.paginator import Paginator
 from django.db.models import Q
 from telebot import types
 
-from app.models import City, Category, Restaurant
+from app.models import Restaurant, City, Category, Options
 from rest_bot import settings
-from telegram_bot import dbworker, config
+from telegram_bot import dbworker
 from telegram_bot.dbworker import get_chosen_city
+
 
 bot = telebot.TeleBot(settings.BOT_TOKEN)
 
@@ -28,11 +29,40 @@ def start(message):
     cities = City.objects.all()
     cities_for_btns = {'city': [city.name for city in cities]}
 
-    keyboard = makeKeyboard(btn_names=cities_for_btns['city'], callback_name='list_of_categories')
+    keyboard = makeKeyboard(btn_names=cities_for_btns['city'], callback_name='list_of_categories_opt')
     bot.send_message(message.chat.id, text=text, reply_markup=keyboard, parse_mode='HTML')
 
 
-@bot.callback_query_handler(func=lambda call: 'list_of_categories' in call.data)
+@bot.callback_query_handler(func=lambda call: 'opt' in call.data)
+def chosen_category(call):
+    """Коллбэк хэндлер. Вызывает обработчик в зависимости от полученных данных"""
+
+    city = get_chosen_city(call.from_user.id).decode()
+
+    if 'Сменить город' in call.data:
+        start(call.message)
+    elif 'list_of_categories' in call.data:
+        show_categories(call, city=None)
+    elif 'Показать рестораны рядом' in call.data:
+        request_users_location(call)
+    elif 'Выпить' in call.data:
+        drink_option(call, city)
+    elif 'show_categories' in call.data:
+        # удаляем из базы Редис старые id ресторанов
+        dbworker.clear_set_of_restaurants(call.from_user.id)
+        show_categories(call, city)
+    elif 'next_page' in call.data:
+        next_page_number = int(call.data[call.data.find('=') + 1:call.data.rfind('_')])
+
+        show_option_info(call, city, next_page_number)
+    elif 'previous_page' in call.data:
+        previous_page_number = int(call.data[call.data.find('=') + 1:call.data.rfind('_')])
+        show_option_info(call, city, previous_page_number)
+    else:
+        save_rests_in_redis(call, city)
+        show_option_info(call, city)
+
+
 def show_categories(call, city=None):
     """Вывод всех возможных категорий"""
 
@@ -58,34 +88,6 @@ def show_categories(call, city=None):
                           message_id=call.message.message_id,
                           reply_markup=keyboard,
                           parse_mode='HTML')
-
-
-@bot.callback_query_handler(func=lambda call: 'opt' in call.data)
-def chosen_category(call):
-    """Коллбэк хэндлер. Вызывает обработчик в зависимости от полученных данных"""
-
-    city = get_chosen_city(call.from_user.id).decode()
-
-    if 'Сменить город' in call.data:
-        start(call.message)
-    elif 'Показать рестораны рядом' in call.data:
-        print('Потом доделаем. Переход к команде /nearme{{city}}')
-    elif 'Выпить' in call.data:
-        drink_option(call, city)
-    elif 'show_categories' in call.data:
-        # удаляем из базы Редис старые id ресторанов
-        dbworker.clear_set_of_restaurants(call.from_user.id)
-        show_categories(call, city)
-    elif 'next_page' in call.data:
-        next_page_number = int(call.data[call.data.find('=') + 1:call.data.rfind('_')])
-
-        show_option_info(call, city, next_page_number)
-    elif 'previous_page' in call.data:
-        previous_page_number = int(call.data[call.data.find('=') + 1:call.data.rfind('_')])
-        show_option_info(call, city, previous_page_number)
-    else:
-        save_rests_in_redis(call, city)
-        show_option_info(call, city)
 
 
 def save_rests_in_redis(call, city):
@@ -127,7 +129,9 @@ def show_option_info(call, city, page_number=None):
     restaurant_ids = dbworker.get_set_of_restaurants(call.from_user.id)
     list_of_restaurant_ids = [int(id) for id in restaurant_ids]
 
-    paginator = Paginator(list_of_restaurant_ids, 3)
+    items_on_page = 5
+
+    paginator = Paginator(list_of_restaurant_ids, items_on_page)
     if page_number is None:
         page_number = 1
         page = paginator.get_page(page_number)
@@ -135,13 +139,12 @@ def show_option_info(call, city, page_number=None):
     else:
         page = paginator.get_page(page_number)
 
-    text = f'''<b>Кофе в {city} (1/6)</b>
+    restaurant_options = Options.objects.all()
 
-    <b>Условные обозначения:</b>
-    🐶 <i>dog-friendly</i>
-    🍴 <i>есть завтраки</i>
-    🌿 <i>есть веранда/терраса</i>
-'''
+    text = f'''<b>Кофе в {city} ({page_number}/{paginator.num_pages})</b>\n\n<b>Условные обозначения:</b>'''
+
+    for i in restaurant_options:
+        text += f'\n<i>{i.name}</i>'
 
     text += get_text(page)
     keyboard = get_keyboard(page)
@@ -158,9 +161,7 @@ def get_text(page):
     text = ''
 
     for i in page_content:
-        text += f'''\n\n<b>{i.name}</b>
-        {i.short_description}
-        <a href="{i.google_map_link}">{i.address}</a>'''
+        text += f'''\n\n<b>{i.name}</b>\n{i.short_description}\n<a href="{i.google_map_link}">{i.address}</a>'''
     return text
 
 
@@ -183,6 +184,23 @@ def get_keyboard(page):
                                                 callback_data=f'previous_page={page.previous_page_number()}_opt'))
         keyboard.add(types.InlineKeyboardButton(text='<<< Вернуться к подборкам', callback_data='show_categories_opt'))
         return keyboard
+
+
+# Работа с геопозицией юзера
+def request_users_location(call):
+    keyboard = types.ReplyKeyboardMarkup(row_width=1, one_time_keyboard=True)
+    button_geo = types.KeyboardButton(text="Отправить местоположение", request_location=True)
+    keyboard.add(button_geo)
+    bot.send_message(call.message.chat.id,
+                     "Поделитесь своим местоположением!",
+                     reply_markup=keyboard)
+
+
+@bot.message_handler(content_types=['location'])
+def test(message):
+    user_location_longitude = message.location.longitude
+    user_location_latitude = message.location.latitude
+    print(user_location_longitude, user_location_latitude)
 
 
 # Вебхук бота

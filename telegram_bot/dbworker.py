@@ -1,7 +1,6 @@
 import redis
 
 from rest_bot import settings
-from telegram_bot import config
 
 db = redis.Redis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=0)
 
