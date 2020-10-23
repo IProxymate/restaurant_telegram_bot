@@ -31,7 +31,7 @@ class OptionsAdmin(admin.ModelAdmin):
 
 
 class RestaurantAdmin(admin.ModelAdmin):
-    list_display = ['id', 'name', 'address']
+    list_display = ['id', 'name', 'address', 'coordinates']
     list_display_links = ['name']
     list_filter = ['cities']
     search_fields = ['name', 'address']

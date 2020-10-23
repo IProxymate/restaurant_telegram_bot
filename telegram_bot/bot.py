@@ -197,10 +197,10 @@ def request_users_location(call):
 
 
 @bot.message_handler(content_types=['location'])
-def test(message):
+def process_location(message):
     user_location_longitude = message.location.longitude
     user_location_latitude = message.location.latitude
-    print(user_location_longitude, user_location_latitude)
+    print(user_location_latitude, user_location_longitude)
 
 
 # Вебхук бота
