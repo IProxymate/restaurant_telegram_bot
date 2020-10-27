@@ -1,10 +1,10 @@
 import redis
 
+from app.models import Restaurant
 from rest_bot import settings
 
 db = redis.Redis(host=settings.REDIS_HOST, port=settings.REDIS_PORT, db=0)
 
-# Пытаемся узнать из базы «состояние» пользователя
 def get_chosen_city(user_id):
     try:
         return db[user_id]
@@ -34,3 +34,14 @@ def clear_set_of_restaurants(user_id):
     while (db.scard(f'{user_id} category') > 0):
         print("Removing {}...".format(db.spop(f'{user_id} category')))
     return True
+
+
+def save_user_location(user_id, longitude, latitude):
+    location = {'longitude': f'{longitude}', 'latitude': f'{latitude}'}
+    db.hmset(f'{user_id} location', location)
+
+
+
+def get_user_location(user_id):
+    location = db.hgetall(f'{user_id} location')
+    return location

@@ -1,13 +1,15 @@
+import re
+
 import telebot
 from django.core.paginator import Paginator
 from django.db.models import Q
 from telebot import types
 
 from app.models import Restaurant, City, Category, Options
+from distance.get_distance import Distance
 from rest_bot import settings
 from telegram_bot import dbworker
-from telegram_bot.dbworker import get_chosen_city
-
+from telegram_bot.dbworker import get_chosen_city, save_set_of_restaurants, save_user_location, get_user_location
 
 bot = telebot.TeleBot(settings.BOT_TOKEN)
 
@@ -37,7 +39,11 @@ def start(message):
 def chosen_category(call):
     """Коллбэк хэндлер. Вызывает обработчик в зависимости от полученных данных"""
 
-    city = get_chosen_city(call.from_user.id).decode()
+    # Проверяем, сохранен ли город пользователя в БД Редиса
+    try:
+        city = get_chosen_city(call.from_user.id).decode()
+    except AttributeError:
+        start(call.message)
 
     if 'Сменить город' in call.data:
         start(call.message)
@@ -59,8 +65,31 @@ def chosen_category(call):
         previous_page_number = int(call.data[call.data.find('=') + 1:call.data.rfind('_')])
         show_option_info(call, city, previous_page_number)
     else:
-        save_rests_in_redis(call, city)
+        # получаем QuerySet со всеми ресторанами нужной категории
+        chosen_cat = call.data[0:-4]
+        restaurants_list = Restaurant.objects.filter(cities__name__contains=city).filter(
+            categories__name=chosen_cat).order_by('id').iterator()
+        for restaurant in restaurants_list:
+            save_set_of_restaurants(call.from_user.id, restaurant.id)
         show_option_info(call, city)
+
+
+@bot.callback_query_handler(func=lambda call: 'distance' in call.data)
+def rests_by_geolocation(call):
+    request_distance = re.search(r'\d+', call.data).group()
+    users_location_longitude = get_user_location(call.from_user.id)[b'longitude'].decode()
+    users_location_latitude = get_user_location(call.from_user.id)[b'latitude'].decode()
+
+    rests_in_city = Restaurant.objects.filter(
+        cities__name__exact=get_chosen_city(call.from_user.id).decode())
+    #     !TODO Обработать момент, если юзер не выбрал город, а отправил геолокацию!
+    # получаем словарь с id и координатами всех ресторанов в выбранном городе
+    list_of_coords = {rest.id: rest.coordinates for rest in rests_in_city}
+    distance = Distance()
+    result = distance.get_group_by_distance(origin=f'{users_location_longitude}, {users_location_latitude}',
+                                            dict_of_coords=list_of_coords, max_allowed_distance=request_distance)
+    print(result)
+
 
 
 def show_categories(call, city=None):
@@ -88,16 +117,6 @@ def show_categories(call, city=None):
                           message_id=call.message.message_id,
                           reply_markup=keyboard,
                           parse_mode='HTML')
-
-
-def save_rests_in_redis(call, city):
-    # получаем QuerySet со всеми ресторанами нужной категории
-    chosen_cat = call.data[0:-4]
-    restaurants_list = Restaurant.objects.filter(cities__name__contains=city).filter(
-        categories__name=chosen_cat).order_by('id').iterator()
-
-    for restaurant in restaurants_list:
-        dbworker.save_set_of_restaurants(call.from_user.id, restaurant.id)
 
 
 def drink_option(call, city):
@@ -188,7 +207,7 @@ def get_keyboard(page):
 
 # Работа с геопозицией юзера
 def request_users_location(call):
-    keyboard = types.ReplyKeyboardMarkup(row_width=1, one_time_keyboard=True)
+    keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     button_geo = types.KeyboardButton(text="Отправить местоположение", request_location=True)
     keyboard.add(button_geo)
     bot.send_message(call.message.chat.id,
@@ -198,9 +217,20 @@ def request_users_location(call):
 
 @bot.message_handler(content_types=['location'])
 def process_location(message):
+    text = 'Выбери, в каком радиусе ищешь ресторан?'
+
     user_location_longitude = message.location.longitude
     user_location_latitude = message.location.latitude
-    print(user_location_latitude, user_location_longitude)
+
+    save_user_location(message.from_user.id, user_location_latitude, user_location_longitude)
+
+    btn_names = ['до 500 метров', 'до 1 км', 'до 2 км', 'до 5 км']
+    keyboard = makeKeyboard(btn_names, callback_name='distance', row_width=1)
+
+    bot.send_message(chat_id=message.chat.id,
+                     text=text,
+                     reply_markup=keyboard,
+                     parse_mode='HTML')
 
 
 # Вебхук бота
