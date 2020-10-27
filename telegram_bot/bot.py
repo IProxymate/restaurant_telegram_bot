@@ -9,12 +9,13 @@ from app.models import Restaurant, City, Category, Options
 from distance.get_distance import Distance
 from rest_bot import settings
 from telegram_bot import dbworker
-from telegram_bot.dbworker import get_chosen_city, save_set_of_restaurants, save_user_location, get_user_location
+from telegram_bot.dbworker import get_chosen_city, save_set_of_restaurants, save_user_location, get_user_location, \
+    get_distance_of_rest
 
 bot = telebot.TeleBot(settings.BOT_TOKEN)
 
 
-def makeKeyboard(btn_names, callback_name=None, row_width=2):
+def make_keyboard(btn_names, callback_name=None, row_width=2):
     keyboard = types.InlineKeyboardMarkup(row_width=row_width)
 
     keyboard.add(
@@ -26,12 +27,10 @@ def makeKeyboard(btn_names, callback_name=None, row_width=2):
 def start(message):
     text = 'Привет!🤗\nЯ помогу тебе выбрать ресторан.\nВ каком городе ищем?'
 
-    print(dbworker.clear_set_of_restaurants(message.from_user.id))
-
     cities = City.objects.all()
     cities_for_btns = {'city': [city.name for city in cities]}
 
-    keyboard = makeKeyboard(btn_names=cities_for_btns['city'], callback_name='list_of_categories_opt')
+    keyboard = make_keyboard(btn_names=cities_for_btns['city'], callback_name='list_of_categories_opt')
     bot.send_message(message.chat.id, text=text, reply_markup=keyboard, parse_mode='HTML')
 
 
@@ -43,7 +42,7 @@ def chosen_category(call):
     try:
         city = get_chosen_city(call.from_user.id).decode()
     except AttributeError:
-        start(call.message)
+        pass
 
     if 'Сменить город' in call.data:
         start(call.message)
@@ -59,37 +58,47 @@ def chosen_category(call):
         show_categories(call, city)
     elif 'next_page' in call.data:
         next_page_number = int(call.data[call.data.find('=') + 1:call.data.rfind('_')])
-
-        show_option_info(call, city, next_page_number)
+        restaurant_ids = dbworker.get_set_of_restaurants(call.from_user.id)
+        show_option_info(call, city, restaurant_ids, next_page_number)
     elif 'previous_page' in call.data:
         previous_page_number = int(call.data[call.data.find('=') + 1:call.data.rfind('_')])
-        show_option_info(call, city, previous_page_number)
+        restaurant_ids = dbworker.get_set_of_restaurants(call.from_user.id)
+        show_option_info(call, city, restaurant_ids, previous_page_number)
     else:
         # получаем QuerySet со всеми ресторанами нужной категории
         chosen_cat = call.data[0:-4]
         restaurants_list = Restaurant.objects.filter(cities__name__contains=city).filter(
             categories__name=chosen_cat).order_by('id').iterator()
         for restaurant in restaurants_list:
-            save_set_of_restaurants(call.from_user.id, restaurant.id)
-        show_option_info(call, city)
+            save_set_of_restaurants(call.from_user.id, restaurant.id, distance='None')
+        restaurant_ids = dbworker.get_set_of_restaurants(call.from_user.id)
+        show_option_info(call, city, restaurant_ids)
 
 
 @bot.callback_query_handler(func=lambda call: 'distance' in call.data)
 def rests_by_geolocation(call):
     request_distance = re.search(r'\d+', call.data).group()
+    # получаем необходимое расстояние в км
+    if len(request_distance) > 1:
+        request_distance = int(request_distance) / 1000
+
     users_location_longitude = get_user_location(call.from_user.id)[b'longitude'].decode()
     users_location_latitude = get_user_location(call.from_user.id)[b'latitude'].decode()
 
-    rests_in_city = Restaurant.objects.filter(
-        cities__name__exact=get_chosen_city(call.from_user.id).decode())
+    city = get_chosen_city(call.from_user.id).decode()
+
+    rests_in_city = Restaurant.objects.filter(cities__name__exact=city)
     #     !TODO Обработать момент, если юзер не выбрал город, а отправил геолокацию!
     # получаем словарь с id и координатами всех ресторанов в выбранном городе
     list_of_coords = {rest.id: rest.coordinates for rest in rests_in_city}
     distance = Distance()
     result = distance.get_group_by_distance(origin=f'{users_location_longitude}, {users_location_latitude}',
                                             dict_of_coords=list_of_coords, max_allowed_distance=request_distance)
-    print(result)
 
+    for restaurant, distance in result.items():
+        save_set_of_restaurants(call.from_user.id, restaurant, distance)
+    restaurant_ids = dbworker.get_set_of_restaurants(call.from_user.id)
+    show_option_info(call, city, restaurant_ids)
 
 
 def show_categories(call, city=None):
@@ -110,7 +119,7 @@ def show_categories(call, city=None):
     btn_names.append('Показать рестораны рядом')
     btn_names.append('Сменить город')
 
-    keyboard = makeKeyboard(btn_names, callback_name='opt', row_width=1)
+    keyboard = make_keyboard(btn_names, callback_name='opt', row_width=1)
 
     bot.edit_message_text(chat_id=call.message.chat.id,
                           text=text,
@@ -131,7 +140,7 @@ def drink_option(call, city):
 
     btn_names = [option.name for option in drink_options]
 
-    keyboard = makeKeyboard(btn_names, callback_name='opt', row_width=1)
+    keyboard = make_keyboard(btn_names, callback_name='opt', row_width=1)
     # TODO ебалу делаю, потом поменять все надо))
     keyboard.add(types.InlineKeyboardButton(text='Сменить город', callback_data='Сменить город_opt'))
 
@@ -142,45 +151,60 @@ def drink_option(call, city):
                           parse_mode='HTML')
 
 
-def show_option_info(call, city, page_number=None):
+def show_option_info(call, city, restaurant_ids, page_number=None):
     """Постранично отображаем информацию о ресторанах выбранной категории"""
+    if not restaurant_ids:
+        text = 'Мы не нашли ни одного ресторана рядом с вами.'
+        keyboard = types.InlineKeyboardMarkup(row_width=1)
+        keyboard.add(
+            types.InlineKeyboardButton(text='< Назад', callback_data=f'show_categories_opt'))
 
-    restaurant_ids = dbworker.get_set_of_restaurants(call.from_user.id)
-    list_of_restaurant_ids = [int(id) for id in restaurant_ids]
-
-    items_on_page = 5
-
-    paginator = Paginator(list_of_restaurant_ids, items_on_page)
-    if page_number is None:
-        page_number = 1
-        page = paginator.get_page(page_number)
-        print(page.object_list)
+        bot.edit_message_text(chat_id=call.message.chat.id,
+                              text=text,
+                              message_id=call.message.message_id,
+                              reply_markup=keyboard,
+                              parse_mode='HTML')
     else:
-        page = paginator.get_page(page_number)
+        list_of_restaurant_ids = [int(id) for id in restaurant_ids]
+        items_on_page = 5
 
-    restaurant_options = Options.objects.all()
+        paginator = Paginator(list_of_restaurant_ids, items_on_page)
+        if page_number is None:
+            page_number = 1
+            page = paginator.get_page(page_number)
+        else:
+            page = paginator.get_page(page_number)
 
-    text = f'''<b>Кофе в {city} ({page_number}/{paginator.num_pages})</b>\n\n<b>Условные обозначения:</b>'''
+        restaurant_options = Options.objects.all()
 
-    for i in restaurant_options:
-        text += f'\n<i>{i.name}</i>'
+        text = f'''<b>Кофе в {city} ({page_number}/{paginator.num_pages})</b>\n\n<b>Условные обозначения:</b>'''
 
-    text += get_text(page)
-    keyboard = get_keyboard(page)
+        for i in restaurant_options:
+            text += f'\n<i>{i.name}</i>'
 
-    bot.edit_message_text(chat_id=call.message.chat.id,
-                          text=text,
-                          message_id=call.message.message_id,
-                          reply_markup=keyboard,
-                          parse_mode='HTML')
+        text += get_text(page, call.from_user.id)
+        keyboard = get_keyboard(page)
+
+        bot.edit_message_text(chat_id=call.message.chat.id,
+                              text=text,
+                              message_id=call.message.message_id,
+                              reply_markup=keyboard,
+                              parse_mode='HTML')
 
 
-def get_text(page):
+def get_text(page, user_id):
     page_content = Restaurant.objects.filter(id__in=page.object_list).order_by('name')
     text = ''
 
     for i in page_content:
-        text += f'''\n\n<b>{i.name}</b>\n{i.short_description}\n<a href="{i.google_map_link}">{i.address}</a>'''
+        distance_info = ''
+        distance = get_distance_of_rest(user_id, i.id)
+        if distance == 'None':
+            pass
+        else:
+            distance_info += f'\n(примерно в {distance}км от Вас 🏃‍)\n'
+
+        text += f'''\n\n<b>{i.name}</b>{distance_info}\n{i.short_description}\n<a href="{i.google_map_link}">{i.address}</a>'''
     return text
 
 
@@ -225,7 +249,7 @@ def process_location(message):
     save_user_location(message.from_user.id, user_location_latitude, user_location_longitude)
 
     btn_names = ['до 500 метров', 'до 1 км', 'до 2 км', 'до 5 км']
-    keyboard = makeKeyboard(btn_names, callback_name='distance', row_width=1)
+    keyboard = make_keyboard(btn_names, callback_name='distance', row_width=1)
 
     bot.send_message(chat_id=message.chat.id,
                      text=text,

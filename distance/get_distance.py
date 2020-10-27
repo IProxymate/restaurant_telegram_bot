@@ -31,7 +31,7 @@ class Distance:
         # !TODO нужно сохранять еще и дистанцию
         for id, coords in dict_of_coords.items():
             if self.get_distance(origin=origin, destination=coords) <= float(max_allowed_distance):
-                distance_group[id] = coords
+                distance_group[id] = round(self.get_distance(origin=origin, destination=coords), 2)
             else:
                 pass
 
