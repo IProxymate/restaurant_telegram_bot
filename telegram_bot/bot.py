@@ -230,8 +230,6 @@ def create_pagination_keys(page):
         keyboard.add(types.InlineKeyboardButton(text='<<< Вернуться к подборкам', callback_data='show_categories_opt'))
         return keyboard
     else:
-        keyboard.add(types.InlineKeyboardButton(text='< Назад',
-                                                callback_data=f'previous_page={page.previous_page_number()}_opt'))
         keyboard.add(types.InlineKeyboardButton(text='<<< Вернуться к подборкам', callback_data='show_categories_opt'))
         return keyboard
 
