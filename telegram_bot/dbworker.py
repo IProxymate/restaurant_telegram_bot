@@ -25,7 +25,6 @@ def save_users_city(user_id, city):
 
 def save_set_of_restaurants(user_id, rest_id, distance):
     # сохраняем id ресторанов в базу Редис
-    # db.sadd(f'{user_id} category', str(rest_id))
     rest_info = {f'{rest_id}': f'{distance}'}
     db.hmset(f'{user_id} category', rest_info)
     return True

@@ -35,7 +35,7 @@ def start(message):
 
 
 @bot.callback_query_handler(func=lambda call: 'opt' in call.data)
-def chosen_category(call):
+def category_handler(call):
     """Коллбэк хэндлер. Вызывает обработчик в зависимости от полученных данных"""
 
     # Проверяем, сохранен ли город пользователя в БД Редиса
@@ -77,6 +77,8 @@ def chosen_category(call):
 
 @bot.callback_query_handler(func=lambda call: 'distance' in call.data)
 def rests_by_geolocation(call):
+    """Формируем список ресторанов, попадающий в группу удаленности выбранную пользователем(все рестораны в радиусе 1км, например)"""
+
     request_distance = re.search(r'\d+', call.data).group()
     # получаем необходимое расстояние в км
     if len(request_distance) > 1:
@@ -193,6 +195,7 @@ def show_option_info(call, city, restaurant_ids, page_number=None):
 
 
 def get_text(page, user_id):
+    """Формируем страничку с подборкой ресторана"""
     page_content = Restaurant.objects.filter(id__in=page.object_list).prefetch_related('options').order_by('name')
 
     text = ''
@@ -235,6 +238,7 @@ def create_pagination_keys(page):
 
 # Работа с геопозицией юзера
 def request_users_location(call):
+    """Запрашиваем геолокацию пользователя"""
     keyboard = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
     button_geo = types.KeyboardButton(text="Отправить местоположение", request_location=True)
     keyboard.add(button_geo)
@@ -245,6 +249,7 @@ def request_users_location(call):
 
 @bot.message_handler(content_types=['location'])
 def process_location(message):
+    """Получаем координаты юзера, сохраняем в БД Редис"""
     text = 'Выбери, в каком радиусе ищешь ресторан?'
 
     user_location_longitude = message.location.longitude
