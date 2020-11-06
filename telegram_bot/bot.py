@@ -183,7 +183,7 @@ def show_option_info(call, city, restaurant_ids, page_number=None):
             text += f'\n<i>{i.emoji} {i.name}</i>'
 
         text += get_text(page, call.from_user.id)
-        keyboard = get_keyboard(page)
+        keyboard = create_pagination_keys(page)
 
         bot.edit_message_text(chat_id=call.message.chat.id,
                               text=text,
@@ -212,7 +212,7 @@ def get_text(page, user_id):
     return text
 
 
-def get_keyboard(page):
+def create_pagination_keys(page):
     keyboard = types.InlineKeyboardMarkup(row_width=5)
     if page.has_next() and page.has_previous():
         keyboard.add(
