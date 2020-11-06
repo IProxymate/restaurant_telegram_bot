@@ -180,7 +180,7 @@ def show_option_info(call, city, restaurant_ids, page_number=None):
         text = f'''<b>Кофе в {city} ({page_number}/{paginator.num_pages})</b>\n\n<b>Условные обозначения:</b>'''
 
         for i in restaurant_options:
-            text += f'\n<i>{i.name}</i>'
+            text += f'\n<i>{i.emoji} {i.name}</i>'
 
         text += get_text(page, call.from_user.id)
         keyboard = get_keyboard(page)
@@ -193,18 +193,22 @@ def show_option_info(call, city, restaurant_ids, page_number=None):
 
 
 def get_text(page, user_id):
-    page_content = Restaurant.objects.filter(id__in=page.object_list).order_by('name')
+    page_content = Restaurant.objects.filter(id__in=page.object_list).prefetch_related('options').order_by('name')
+
     text = ''
 
-    for i in page_content:
+    for rest in page_content:
         distance_info = ''
-        distance = get_distance_of_rest(user_id, i.id)
+        distance = get_distance_of_rest(user_id, rest.id)
         if distance == 'None':
             pass
         else:
             distance_info += f'\n(примерно в {distance}км от Вас 🏃‍)\n'
 
-        text += f'''\n\n<b>{i.name}</b>{distance_info}\n{i.short_description}\n<a href="{i.google_map_link}">{i.address}</a>'''
+        emoji = [i['emoji'] for i in list(rest.options.values('emoji'))]
+        emoji = ''.join(emoji)
+
+        text += f'''\n\n<b>{rest.name} {emoji}</b>{distance_info}\n{rest.short_description}\n<a href="{rest.google_map_link}">{rest.address}</a>'''
     return text
 
 

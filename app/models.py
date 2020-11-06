@@ -30,13 +30,14 @@ class Options(models.Model):
     """Модель, описывающая дополнительные опции ресторана
     (например, 'веранда' или 'дог-френдли')"""
     name = models.CharField(max_length=35)
+    emoji = models.CharField(max_length=5)
 
     class Meta:
         verbose_name = 'Опция'
         verbose_name_plural = 'Опции'
 
     def __str__(self):
-        return f'{self.name}, {self.pk}'
+        return f'{self.pk}: {self.emoji} {self.name}'
 
 
 class Restaurant(models.Model):
