@@ -17,10 +17,10 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/3.1/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'f)c#+vg=eqfp%$wmexk3!gic0^#v%gue(v*m8)#h(!4##%j!1@'
+SECRET_KEY = os.environ.get('SECRET_KEY')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.environ.get('DEBUG')
 
 ALLOWED_HOSTS = ['*']
 
@@ -73,8 +73,8 @@ WSGI_APPLICATION = 'rest_bot.wsgi.application'
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': os.path.join(BASE_DIR, 'db.sqlite3'),
+        'ENGINE': os.environ.get('ENGINE'),
+        'NAME': os.path.join(BASE_DIR, os.environ.get('NAME')),
     }
 }
 
@@ -117,8 +117,8 @@ STATIC_URL = '/static/'
 
 BOT_TOKEN ='911269336:AAH3mtva76Tdyl2zpPQ1E0ooEycIK8Lf14g'
 
-DOMAIN = 'deb6deb544a8.ngrok.io'
+DOMAIN = os.environ.get('DOMAIN')
 
 
-REDIS_HOST = 'localhost'
-REDIS_PORT = 6379
+REDIS_HOST = os.environ.get('REDIS_HOST')
+REDIS_PORT = int(os.environ.get('REDIS_PORT'))
